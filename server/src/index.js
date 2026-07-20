@@ -3,6 +3,7 @@ import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import cors from "cors";
 import { v4 as uuidv4 } from "uuid";
+import { initDb, saveMessage, getRecentMessages, cleanOldMessages } from "./db.js";
 
 const app = express();
 const server = createServer(app);
@@ -14,6 +15,7 @@ app.use(express.json());
 const users = new Map();
 const USERNAME_REGEX = /^[a-zA-Z0-9]+$/;
 const MIN_USERNAME_LENGTH = 3;
+const CLEANUP_INTERVAL = 60 * 60 * 1000;
 
 function validateUsername(username) {
   if (!username || typeof username !== "string") {
@@ -56,7 +58,7 @@ function broadcast(data, exclude) {
 wss.on("connection", (ws) => {
   let userId = null;
 
-  ws.on("message", (raw) => {
+  ws.on("message", async (raw) => {
     let data;
     try {
       data = JSON.parse(raw);
@@ -75,14 +77,29 @@ wss.on("connection", (ws) => {
       userId = uuidv4();
       users.set(userId, { username: result.username, ws });
 
-      ws.send(
-        JSON.stringify({
-          type: "joined",
-          userId,
-          username: result.username,
-          onlineUsers: Array.from(users.values()).map((u) => u.username),
-        })
-      );
+      try {
+        const history = await getRecentMessages();
+        ws.send(
+          JSON.stringify({
+            type: "joined",
+            userId,
+            username: result.username,
+            onlineUsers: Array.from(users.values()).map((u) => u.username),
+            history,
+          })
+        );
+      } catch (err) {
+        console.error("Failed to load history:", err.message);
+        ws.send(
+          JSON.stringify({
+            type: "joined",
+            userId,
+            username: result.username,
+            onlineUsers: Array.from(users.values()).map((u) => u.username),
+            history: [],
+          })
+        );
+      }
 
       broadcast(
         {
@@ -118,6 +135,12 @@ wss.on("connection", (ws) => {
         timestamp: new Date().toISOString(),
       };
 
+      try {
+        await saveMessage(chatMessage);
+      } catch (err) {
+        console.error("Failed to save message:", err.message);
+      }
+
       broadcast(chatMessage);
       return;
     }
@@ -142,7 +165,28 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+async function startServer() {
+  await initDb();
+  console.log("Database initialized");
+
+  setInterval(async () => {
+    try {
+      const deleted = await cleanOldMessages();
+      if (deleted > 0) {
+        console.log(`Cleaned ${deleted} messages older than 2 days`);
+      }
+    } catch (err) {
+      console.error("Cleanup failed:", err.message);
+    }
+  }, CLEANUP_INTERVAL);
+
+  const PORT = process.env.PORT || 3001;
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
 });

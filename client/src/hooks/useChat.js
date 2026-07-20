@@ -37,6 +37,7 @@ export function useChat() {
             connected: true,
             user: { id: data.userId, username: data.username },
             onlineUsers: data.onlineUsers,
+            messages: data.history || [],
             error: null,
           }));
           break;
