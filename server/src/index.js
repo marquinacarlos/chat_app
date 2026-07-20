@@ -119,7 +119,6 @@ wss.on("connection", (ws) => {
       };
 
       broadcast(chatMessage);
-      ws.send(JSON.stringify(chatMessage));
       return;
     }
 
