@@ -1,8 +1,16 @@
 import pg from "pg";
 
+const dbUrl = process.env.DATABASE_URL;
+console.log("DATABASE_URL defined:", !!dbUrl);
+console.log("DATABASE_URL host:", dbUrl ? new URL(dbUrl).hostname : "MISSING");
+
+if (!dbUrl) {
+  throw new Error("DATABASE_URL environment variable is not set");
+}
+
 const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+  connectionString: dbUrl,
+  ssl: { rejectUnauthorized: false },
 });
 
 export async function initDb() {
